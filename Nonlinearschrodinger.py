@@ -128,19 +128,24 @@ class PhysicsInformedNN:
         )
 
         # tf Graphs
+        # Size of t = (batch_size, 1)
+        # Size of x = (batch_size, 1) 
         self.u0_pred, self.v0_pred, _, _ = self.net_uv(self.x0_tf, self.t0_tf)
+
         (
             self.u_lb_pred,
             self.v_lb_pred,
             self.u_x_lb_pred,
             self.v_x_lb_pred,
         ) = self.net_uv(self.x_lb_tf, self.t_lb_tf)
+
         (
             self.u_ub_pred,
             self.v_ub_pred,
             self.u_x_ub_pred,
             self.v_x_ub_pred,
         ) = self.net_uv(self.x_ub_tf, self.t_ub_tf)
+
         self.f_u_pred, self.f_v_pred = self.net_f_uv(self.x_f_tf, self.t_f_tf)
 
         # Loss
@@ -185,10 +190,10 @@ class PhysicsInformedNN:
         weights = []
         biases = []
         num_layers = len(layers)
-        for l in range(0, num_layers - 1):
-            W = self.xavier_init(size=[layers[l], layers[l + 1]])
+        for i in range(0, num_layers - 1):
+            W = self.xavier_init(size=[layers[i], layers[i + 1]])
             b = tf.Variable(
-                tf.zeros([1, layers[l + 1]], dtype=tf.float32), dtype=tf.float32
+                tf.zeros([1, layers[i + 1]], dtype=tf.float32), dtype=tf.float32
             )
             weights.append(W)
             biases.append(b)
@@ -203,31 +208,41 @@ class PhysicsInformedNN:
             dtype=tf.float32,
         )
 
-    def neural_net(self, X, weights, biases):
-        num_layers = len(weights) + 1
+    def neural_net(self, X):
+        num_layers = len(self.weights) + 1
 
+        # The function first normalizes the input X to the range [-1, 1] 
+        # using the attributes self.lb (lower bound) and self.ub (upper bound) of the class to which this function belongs.
+        # H = normalized X
         H = 2.0 * (X - self.lb) / (self.ub - self.lb) - 1.0
-        for l in range(0, num_layers - 2):
-            W = weights[l]
-            b = biases[l]
+        for i in range(0, num_layers - 2):
+            W = self.weights[i]
+            b = self.biases[i]
             H = tf.tanh(tf.add(tf.matmul(H, W), b))
-        W = weights[-1]
-        b = biases[-1]
+
+        # Last layer does not have an activation function
+        W = self.weights[-1]
+        b = self.biases[-1]
         Y = tf.add(tf.matmul(H, W), b)
         return Y
 
+    # Extracts two fields u and v from the output of the neural network
+    # Basically, the input of this neural network is the concatenation of x and t
     def net_uv(self, x, t):
         X = tf.concat([x, t], 1)
 
-        uv = self.neural_net(X, self.weights, self.biases)
+        uv = self.neural_net(X)
         u = uv[:, 0:1]
         v = uv[:, 1:2]
 
+        # Calculates the first derivative of u and v with respect to x
         u_x = tf.gradients(u, x)[0]
         v_x = tf.gradients(v, x)[0]
 
         return u, v, u_x, v_x
 
+    # Calculating the second derivative of u and v with respect to x
+    # and the first derivative of u and v with respect to t
     def net_f_uv(self, x, t):
         u, v, u_x, v_x = self.net_uv(x, t)
 
@@ -237,6 +252,7 @@ class PhysicsInformedNN:
         v_t = tf.gradients(v, t)[0]
         v_xx = tf.gradients(v_x, x)[0]
 
+        # Then check the PDE conditions
         f_u = u_t + 0.5 * v_xx + (u**2 + v**2) * v
         f_v = v_t - 0.5 * u_xx - (u**2 + v**2) * u
 
@@ -307,6 +323,9 @@ if __name__ == "__main__":
     # (usually polynomials up to a certain degree) and a number of points in the domain (called collocation points),
     # and to select that solution which satisfies the given equation at the collocation points. 
     N_f = 20000
+
+    # This is why the first layer of the neural network has 2 neurons
+    # Because our initial data is literally two dimensional!
     layers = [2, 100, 100, 100, 100, 2]
 
     data = scipy.io.loadmat("main/Data/NLS.mat")
